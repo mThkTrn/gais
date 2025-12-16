@@ -1,0 +1,14 @@
+{
+  "name": "gaze-cursor",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.6"
+  }
+}

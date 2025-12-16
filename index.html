@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Gaze Cursor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            padding: 20px;
+            background: #222;
+            color: #eee;
+        }
+
+        .card {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .status {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .status.active {
+            color: #0f0;
+        }
+
+        .status.inactive {
+            color: #f00;
+        }
+
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+
+        .btn:hover {
+            background: #0056b3;
+        }
+
+        .data-box {
+            font-family: monospace;
+            line-height: 1.5;
+        }
+
+        .indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #555;
+            vertical-align: middle;
+            margin-left: 5px;
+        }
+
+        .indicator.active {
+            background: #0f0;
+            box-shadow: 0 0 5px #0f0;
+        }
+
+        .shortcuts {
+            font-size: 0.9em;
+            color: #aaa;
+            margin-top: 10px;
+        }
+
+        .key {
+            background: #444;
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #fff;
+        }
+
+        .log {
+            height: 100px;
+            overflow-y: auto;
+            background: #111;
+            padding: 5px;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Gaze Cursor Control</h2>
+
+    <div class="card">
+        <div class="status">Tracking Status: <span id="status-text" class="inactive">Inactive</span></div>
+        <button id="calib-btn" class="btn">Start Calibration</button>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button id="start-btn" class="btn" style="background-color: #28a745;">Start Tracking</button>
+            <button id="stop-btn" class="btn" style="background-color: #dc3545;">Stop Tracking</button>
+        </div>
+        <div class="shortcuts">
+            <p>1. Ensure your face is visible.</p>
+            <p>2. Click <b>Start Calibration</b> and follow the dots.</p>
+            <p>3. Use <span class="key">Ctrl+Shift+S</span> to START Cursor Control.</p>
+            <p>4. Use <span class="key">Ctrl+Shift+Q</span> to STOP Cursor Control.</p>
+        </div>
+    </div>
+
+    <div class="card data-box">
+        <div>Gaze: (<span id="gaze-x">0</span>, <span id="gaze-y">0</span>)</div>
+        <div>L-Click: <span id="blink-left" class="indicator"></span> <span id="ear-left" style="color:#777">0.00</span>
+        </div>
+        <div>R-Click: <span id="blink-right" class="indicator"></span> <span id="ear-right"
+                style="color:#777">0.00</span></div>
+    </div>
+
+    <div class="log" id="click-log"></div>
+
+    <script>
+        const statusText = document.getElementById('status-text');
+        const calibBtn = document.getElementById('calib-btn');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+
+        const gazeX = document.getElementById('gaze-x');
+        const gazeY = document.getElementById('gaze-y');
+        const blinkLeft = document.getElementById('blink-left');
+        const blinkRight = document.getElementById('blink-right');
+        const earLeft = document.getElementById('ear-left');
+        const earRight = document.getElementById('ear-right');
+        const clickLog = document.getElementById('click-log');
+
+        calibBtn.addEventListener('click', () => {
+            window.electronAPI.startCalibration();
+        });
+
+        startBtn.addEventListener('click', () => {
+            console.log("Start button clicked");
+            window.electronAPI.startTracking();
+        });
+
+        stopBtn.addEventListener('click', () => {
+            console.log("Stop button clicked");
+            window.electronAPI.stopTracking();
+        });
+
+        window.electronAPI.onTrackerData((data) => {
+            gazeX.textContent = data.x.toFixed(0);
+            gazeY.textContent = data.y.toFixed(0);
+            earLeft.textContent = data.raw_ear_left.toFixed(2);
+            earRight.textContent = data.raw_ear_right.toFixed(2);
+
+            if (data.blink_left) blinkLeft.classList.add('active');
+            else blinkLeft.classList.remove('active');
+
+            if (data.blink_right) blinkRight.classList.add('active');
+            else blinkRight.classList.remove('active');
+
+            if (data.active) {
+                statusText.textContent = "ACTIVE";
+                statusText.className = "status active";
+            } else {
+                statusText.textContent = "INACTIVE";
+                statusText.className = "status inactive";
+            }
+        });
+
+        window.electronAPI.onClickEvent((type) => {
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()} - ${type.toUpperCase()} CLICK`;
+            clickLog.prepend(entry);
+        });
+    </script>
+</body>
+
+</html>
