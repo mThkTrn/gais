@@ -1,53 +1,43 @@
 import sys
-import json
 import cv2
-import time
 import numpy as np
-import mediapipe as mp
 import pyautogui
-
-# Try to import EyeTrax
-try:
-    from eyetrax import GazeEstimator, run_9_point_calibration
-    EYETRAX_AVAILABLE = True
-except ImportError:
-    EYETRAX_AVAILABLE = False
-    sys.stderr.write("Warning: eyetrax not found. Gaze tracking will be simulated/zeros.\n")
+from time import time, sleep
 
 # Configuration
-EAR_THRESHOLD = 0.22      # Eye Aspect Ratio threshold for blink
-LONG_BLINK_DURATION = 0.4 # Seconds to count as a "long" blink (click)
-SMOOTHING_FACTOR = 0.15   # Lower = smoother but more lag (0.1 to 0.5 recommended)
-DEADZONE = 2              # Pixels to ignore for micro-movements
+SMOOTHING_FACTOR = 0.2    # Lower = smoother but more lag
+MOVE_SCALE = 2.0          # Scale factor for mouse movement
+BLINK_DURATION = 0.4       # Seconds to count as a click
 
 # Safe-fail and speed
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE = 0
+pyautogui.FAISE = False    # Disable the failsafe
+pyautogui.PAUSE = 0        # Remove delay after pyautogui functions
 
-class EyeTracker:
+class FaceTracker:
     def __init__(self):
-        # Initialize MediaPipe Face Mesh for Blink Detection
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+        # Initialize face detection
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+        self.eye_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_eye.xml'
         )
         
-        # Initialize EyeTrax
-        self.estimator = None
-        if EYETRAX_AVAILABLE:
-            try:
-                self.estimator = GazeEstimator()
-            except Exception as e:
-                sys.stderr.write(f"Error initializing EyeTrax: {e}\n")
-
+        # Initialize webcam
         self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            print("Error: Could not open webcam")
+            sys.exit(1)
+            
+        # Get screen size
+        self.screen_w, self.screen_h = pyautogui.size()
         
         # State
-        self.blink_start_left = 0
-        self.blink_start_right = 0
+        self.last_blink_time = 0
+        self.blink_start = 0
+        self.eyes_closed = False
+        self.last_face_position = None
+        self.smoothed_x, self.smoothed_y = self.screen_w // 2, self.screen_h // 2
         self.click_triggered_left = False
         self.click_triggered_right = False
         self.calibrated = False
@@ -58,49 +48,130 @@ class EyeTracker:
         self.last_mouse_x = 0
         self.last_mouse_y = 0
         
-        # Control State
-        self.tracking_active = False
-        self.calibration_requested = False
+    def detect_face_and_eyes(self, frame):
+        """Detect face and eyes in the frame"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         
-        # Start Input Thread
-        import threading
-        self.input_thread = threading.Thread(target=self.read_input, daemon=True)
-        self.input_thread.start()
-
-    def read_input(self):
-        while True:
-            try:
-                line = sys.stdin.readline()
-                if not line:
-                    break
-                cmd = line.strip()
-                if cmd == "CALIBRATE":
-                    self.calibration_requested = True
-                elif cmd == "START":
-                    self.tracking_active = True
-                    sys.stderr.write("Tracking Started\n")
-                elif cmd == "STOP":
-                    self.tracking_active = False
-                    sys.stderr.write("Tracking Stopped\n")
-            except Exception:
-                break
-
-    def calibrate(self):
-        if EYETRAX_AVAILABLE and self.estimator:
-            sys.stderr.write("Starting Calibration...\n")
-            # Signal calibration start
-            print(json.dumps({"type": "calibration_event", "status": "start"}))
-            sys.stdout.flush()
+        face_rect = None
+        eyes = []
+        
+        for (x, y, w, h) in faces:
+            face_rect = (x, y, w, h)
+            roi_gray = gray[y:y+h, x:x+w]
+            roi_color = frame[y:y+h, x:x+w]
             
-            try:
-                # Release camera before calibration to avoid resource contention
-                if self.cap.isOpened():
-                    self.cap.release()
+            # Detect eyes within the face region
+            detected_eyes = self.eye_cascade.detectMultiScale(roi_gray)
+            for (ex, ey, ew, eh) in detected_eyes:
+                eyes.append((x + ex, y + ey, ew, eh))
                 
-                # This opens a CV2 window
-                run_9_point_calibration(self.estimator)
-                self.calibrated = True
-                sys.stderr.write("Calibration Complete.\n")
+        return face_rect, eyes
+    
+    def update_mouse_position(self, face_rect):
+        """Update mouse position based on face position"""
+        if face_rect is None:
+            return
+            
+        x, y, w, h = face_rect
+        face_center_x = x + w // 2
+        face_center_y = y + h // 2
+        
+        # Map face position to screen coordinates
+        frame_h, frame_w = self.cap.get(4), self.cap.get(3)
+        target_x = (face_center_x / frame_w) * self.screen_w
+        target_y = (face_center_y / frame_h) * self.screen_h
+        
+        # Apply smoothing
+        self.smoothed_x = self.smoothed_x * (1 - SMOOTHING_FACTOR) + target_x * SMOOTHING_FACTOR
+        self.smoothed_y = self.smoothed_y * (1 - SMOOTHING_FACTOR) + target_y * SMOOTHING_FACTOR
+        
+        # Move mouse
+        try:
+            pyautogui.moveTo(
+                int(self.smoothed_x * MOVE_SCALE),
+                int(self.smoothed_y * MOVE_SCALE)
+            )
+        except Exception as e:
+            print(f"Error moving mouse: {e}")
+    
+    def handle_blink(self, eyes):
+        """Handle blink detection for mouse clicks"""
+        current_time = time()
+        
+        if len(eyes) < 2:  # Eyes not detected (blinking)
+            if not self.eyes_closed:
+                self.blink_start = current_time
+                self.eyes_closed = True
+            else:
+                # Check for long press
+                if current_time - self.blink_start > BLINK_DURATION:
+                    if not self.click_triggered_left:
+                        pyautogui.mouseDown(button='left')
+                        self.click_triggered_left = True
+        else:  # Eyes open
+            if self.eyes_closed:
+                self.eyes_closed = False
+                blink_duration = current_time - self.blink_start
+                
+                # Handle click release
+                if self.click_triggered_left:
+                    pyautogui.mouseUp(button='left')
+                    self.click_triggered_left = False
+                # Handle single click
+                elif blink_duration < BLINK_DURATION:
+                    pyautogui.click()
+                
+                self.last_blink_time = current_time
+    
+    def run(self):
+        """Main tracking loop"""
+        print("Starting face tracker. Press 'q' to quit.")
+        
+        try:
+            while True:
+                ret, frame = self.cap.read()
+                if not ret:
+                    print("Failed to grab frame")
+                    break
+                    
+                # Flip frame horizontally for a more intuitive mirror-like experience
+                frame = cv2.flip(frame, 1)
+                
+                # Detect face and eyes
+                face_rect, eyes = self.detect_face_and_eyes(frame)
+                
+                # Update mouse position if face is detected
+                if face_rect is not None:
+                    self.update_mouse_position(face_rect)
+                    
+                    # Draw face rectangle
+                    x, y, w, h = face_rect
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                
+                # Handle blinks for clicks
+                self.handle_blink(eyes)
+                
+                # Display the frame (for debugging)
+                for (ex, ey, ew, eh) in eyes:
+                    cv2.rectangle(frame, (ex, ey), (ex+ew, ey+eh), (0, 255, 0), 2)
+                
+                cv2.imshow('Face Tracker', frame)
+                
+                # Exit on 'q' key
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                    
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+        finally:
+            self.cap.release()
+            cv2.destroyAllWindows()
+            print("Tracker stopped.")
+
+if __name__ == "__main__":
+    tracker = FaceTracker()
+    tracker.run()
 
             except Exception as e:
                 sys.stderr.write(f"Calibration failed: {e}\n")

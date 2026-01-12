@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
 
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 
 let mainWindow;
@@ -31,16 +32,41 @@ function startPythonTracker() {
     let args = [];
 
     if (app.isPackaged) {
-        pythonExecutable = path.join(process.resourcesPath, 'python', 'venv', 'Scripts', 'python.exe');
-        const scriptPath = path.join(process.resourcesPath, 'python', 'tracker.py');
-        args = [scriptPath]; // Args for python script
+        // Production paths
+        const pythonDir = path.join(process.resourcesPath, 'python');
+        const venvDir = path.join(pythonDir, 'venv');
+        
+        // Determine the correct Python executable path based on the platform
+        if (process.platform === 'win32') {
+            pythonExecutable = path.join(venvDir, 'Scripts', 'python.exe');
+        } else {
+            // For macOS and Linux
+            pythonExecutable = path.join(venvDir, 'bin', 'python');
+            // On macOS, we might need to use 'python3' explicitly
+            if (process.platform === 'darwin' && !fs.existsSync(pythonExecutable)) {
+                pythonExecutable = path.join(venvDir, 'bin', 'python3');
+            }
+        }
+        
+        const scriptPath = path.join(pythonDir, 'tracker.py');
+        args = [scriptPath];
 
-        console.log(`Spawning Packaged Python: ${pythonExecutable} ${args}`);
+        console.log(`Spawning Packaged Python: ${pythonExecutable} ${args.join(' ')}`);
         pythonProcess = spawn(pythonExecutable, args, {
             stdio: ['pipe', 'pipe', 'pipe']
         });
     } else {
-        const pythonPath = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
+        // Development paths
+        let pythonPath;
+        if (process.platform === 'win32') {
+            pythonPath = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
+        } else {
+            pythonPath = path.join(__dirname, 'venv', 'bin', 'python');
+            if (process.platform === 'darwin' && !fs.existsSync(pythonPath)) {
+                pythonPath = path.join(__dirname, 'venv', 'bin', 'python3');
+            }
+        }
+        
         const scriptPath = path.join(__dirname, 'tracker.py');
         console.log(`Spawning Python: ${pythonPath} ${scriptPath}`);
         pythonProcess = spawn(pythonPath, [scriptPath]);

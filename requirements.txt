@@ -1,0 +1,6 @@
+opencv-python==4.6.0.66
+numpy==1.24.3
+pyautogui==0.9.54
+pyobjc-core==9.2
+pyobjc==9.2
+# MediaPipe is temporarily removed due to compatibility issues

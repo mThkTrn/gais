@@ -26,14 +26,18 @@
       "**/*",
       "!**/__pycache__/*",
       "!**/*.pyc",
-      "!**/*.py",
-      "!**/*.spec",
-      "!**/build/**/*"
+      "!**/build/**/*",
+      "!**/venv/**/*"
     ],
     "win": {
       "target": "nsis",
       "icon": "media/GAIS_Logo.png",
       "signAndEditExecutable": false
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": ["dmg", "zip"],
+      "icon": "media/GAIS_Logo.png"
     },
     "nsis": {
       "oneClick": false,
